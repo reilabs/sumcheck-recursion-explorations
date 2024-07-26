@@ -14,9 +14,9 @@ import(
 type Circuit struct {
 	Seed frontend.Variable `gnark:"Seed"` 
 	C1 frontend.Variable `gnark:"C1"`
-	R [2]frontend.Variable `gnark:"R"`
-	GCoeffs [4]frontend.Variable `gnark:"G Coefficients"`
-	GiCoeffs [2][2]frontend.Variable `gnark:"G_i Coefficients"`
+	R []frontend.Variable `gnark:"R"`
+	GCoeffs []frontend.Variable `gnark:"G Coefficients"`
+	GiCoeffs [][]frontend.Variable `gnark:"G_i Coefficients"`
 }
 
 func check01 (api frontend.API, result frontend.Variable, polyCoeffs []frontend.Variable) {
@@ -26,34 +26,29 @@ func check01 (api frontend.API, result frontend.Variable, polyCoeffs []frontend.
 }
 
 func checkFirstRound (api frontend.API, circuit *Circuit) {
-	check01(api, circuit.C1, circuit.GiCoeffs[0][:])
+	check01(api, circuit.C1, circuit.GiCoeffs[0])
 }
 
 func checkMiddleRounds (api frontend.API, circuit *Circuit) {
-	var R = &circuit.R
-	var Gi = &circuit.GiCoeffs
-
-	for i:=0; i<len(R)-1; i++ {
+	for i:=0; i<len(circuit.R)-1; i++ {
 		var valToHash = circuit.Seed 
 		if (i > 0) { 
-			valToHash = R[i-1] 
+			valToHash = circuit.R[i-1] 
 		}
-		api.AssertIsEqual(R[i], poseidon.Hash(api, valToHash))
-		evalRnd := polynomials.UniP(Gi[i][:], R[i], api)
-		check01(api, evalRnd, Gi[i+1][:])
+		api.AssertIsEqual(circuit.R[i], poseidon.Hash(api, valToHash))
+		evalRnd := polynomials.UniP(circuit.GiCoeffs[i], circuit.R[i], api)
+		check01(api, evalRnd, circuit.GiCoeffs[i+1])
 	}
 }
 
 func checkLastRound (api frontend.API, circuit *Circuit) {
-	var R = &circuit.R
-	var Gi = &circuit.GiCoeffs
 	var valToHash = circuit.Seed 
-	if (len(R) > 1) { 
-		valToHash = R[len(R)-2] 
+	if (len(circuit.R) > 1) { 
+		valToHash = circuit.R[len(circuit.R)-2] 
 	}
-	api.AssertIsEqual(poseidon.Hash(api, valToHash), R[len(R)-1])
-	evalRnd := polynomials.UniP(Gi[len(R)-1][:], R[len(R)-1], api)
-	evalG := polynomials.MultP(circuit.GCoeffs[:], R[:], api)
+	api.AssertIsEqual(poseidon.Hash(api, valToHash), circuit.R[len(circuit.R)-1])
+	evalRnd := polynomials.UniP(circuit.GiCoeffs[len(circuit.R)-1], circuit.R[len(circuit.R)-1], api)
+	evalG := polynomials.MultP(circuit.GCoeffs, circuit.R, api)
 	api.AssertIsEqual(evalRnd, evalG)
 }
 
@@ -65,20 +60,27 @@ func (circuit *Circuit) Define (api frontend.API) error {
 }
 
 func main() {
-	var circuit Circuit 
+	var GiCoeffs = make([][]frontend.Variable, 2)
+	for i:=0;i<2;i++ {
+		GiCoeffs[i] = make([]frontend.Variable, 2)
+	}
+	var circuit = Circuit{
+		R: make([]frontend.Variable, 2),
+		GCoeffs: make([]frontend.Variable, 4),
+		GiCoeffs: GiCoeffs,
+	}
 	ccs, _ := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
 	pk, vk, _ := groth16.Setup(ccs)
 	R1, _ := new(big.Int).SetString("9256297558679035993185603119224026483248878132105160101344427504900917382708", 10)
 	R2, _ := new(big.Int).SetString("1501086694344315373207989466448958625613689647511317698257372243506299745486", 10)
 	G2_0, _ := new(big.Int).SetString("5880649804197832757310403612414804361198269995899445960335078328126943652508", 10)
 	G2_1, _ := new(big.Int).SetString("5010004099433259042870408211211164478295323719387463638651458302705939844619", 10)
-
 	assignment := Circuit{ 
 		Seed: 47,
 		C1: 34,
-		GCoeffs: [4]frontend.Variable{1,3,7,10}, //evalRnd(x, y) := 1 + 3x + 7y + 10xy
-		R: [2]frontend.Variable{R1, R2},
-		GiCoeffs: [2][2]frontend.Variable{[2]frontend.Variable{9,16}, [2]frontend.Variable{G2_0, G2_1}},
+		GCoeffs: []frontend.Variable{1,3,7,10}, //evalRnd(x, y) := 1 + 3x + 7y + 10xy
+		R: []frontend.Variable{R1, R2},
+		GiCoeffs: [][]frontend.Variable{[]frontend.Variable{9,16}, []frontend.Variable{G2_0, G2_1}},
 	}
 	witness, _ := frontend.NewWitness(&assignment, ecc.BN254.ScalarField())
 	publicWitness, _ := witness.Public()
