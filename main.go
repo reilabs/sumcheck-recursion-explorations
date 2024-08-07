@@ -1,64 +1,87 @@
 package main
 
 import(
-	"github.com/vocdoni/gnark-crypto-primitives/poseidon"
-	"github.com/consensys/gnark/frontend/cs/r1cs"
-	"github.com/consensys/gnark/backend/groth16"
-	"github.com/consensys/gnark-crypto/ecc"
-	"github.com/consensys/gnark/frontend"
-	"tutorial/sumcheck-verifier-circuit/polynomials"
-	// "github.com/kr/pretty"
-	"math/big"
+    "github.com/consensys/gnark/frontend/cs/r1cs"
+    "github.com/consensys/gnark/backend/groth16"
+    "github.com/consensys/gnark-crypto/ecc"
+    "github.com/consensys/gnark/frontend"
+    "tutorial/sumcheck-verifier-circuit/polynomials"
+    "tutorial/sumcheck-verifier-circuit/hashmanager"
+    "math/big"
 )
 
 type Circuit struct {
-	Seed frontend.Variable `gnark:"Seed"` 
-	C1 frontend.Variable `gnark:"C1"`
-	R1 frontend.Variable `gnark:"R1"`
-	R2 frontend.Variable `gnark:"R2"`
-	G_Coeffs [4]frontend.Variable `gnark:"G Coefficients"`
-	G1_Coeffs [2]frontend.Variable `gnark:"G1 Coefficients"`
-	G2_Coeffs [2]frontend.Variable `gnark:"G2 Coefficients"`
+    InitialSeed frontend.Variable `gnark:"Initial Seed"` 
+    // Alleged computed sum of all the evaluations 
+    ComputedSum frontend.Variable `gnark:"ComputedSum"`
+    // Coefficients of the multilinear polynomial whose sum is being calculated in the Sum-check protocol
+    CoeffsOfInitialMultilinearPolynomial []frontend.Variable `gnark:"Initial Multilinear Polynomial Coefficients"`
+    // Coefficients of the univariate polynomial used in the middle steps of the Sum-check protocol
+    CoeffsOfMiddleUnivariatePolynomials [][]frontend.Variable `gnark:"Middle Univariate Polynomials Coefficients"`
+}
+
+func assertSumOfEvaluationAt0And1 (api frontend.API, result frontend.Variable, coeffsOfAPolynomial []frontend.Variable) {
+    evalAt0 := polynomials.UniP(coeffsOfAPolynomial, 0, api)
+    evalAt1 := polynomials.UniP(coeffsOfAPolynomial, 1, api)
+    api.AssertIsEqual(result, api.Add(evalAt0, evalAt1))
+}
+
+func checkFirstRound (api frontend.API, circuit *Circuit) {
+    assertSumOfEvaluationAt0And1(api, circuit.ComputedSum, circuit.CoeffsOfMiddleUnivariatePolynomials[0])
+}
+
+func checkMiddleRounds (api frontend.API, circuit *Circuit, manager *hashmanager.HashManager) {
+    manager.WriteInput(circuit.InitialSeed, circuit.ComputedSum)
+    for i:=1; i<len(circuit.CoeffsOfMiddleUnivariatePolynomials); i++ {
+        hashUntilNow := manager.WriteInputAndCollectAndReturnHash(circuit.CoeffsOfMiddleUnivariatePolynomials[i-1]...)
+        evalOfMiddlePolynomialAtAHash := polynomials.UniP(circuit.CoeffsOfMiddleUnivariatePolynomials[i-1], hashUntilNow, api)
+        assertSumOfEvaluationAt0And1(api, evalOfMiddlePolynomialAtAHash, circuit.CoeffsOfMiddleUnivariatePolynomials[i])
+    }
+}
+
+func checkLastRound (api frontend.API, circuit *Circuit, manager *hashmanager.HashManager) {
+    hashUntilNow := manager.WriteInputAndCollectAndReturnHash(circuit.CoeffsOfMiddleUnivariatePolynomials[len(circuit.CoeffsOfMiddleUnivariatePolynomials)-1]...)
+    evalOfMiddlePolynomialAtAHash := polynomials.UniP(circuit.CoeffsOfMiddleUnivariatePolynomials[len(circuit.CoeffsOfMiddleUnivariatePolynomials)-1], hashUntilNow, api)
+    evalOfInitialPolynomialAtAllHashes := polynomials.MultP(circuit.CoeffsOfInitialMultilinearPolynomial, manager.HashCollector, api)
+    api.AssertIsEqual(evalOfMiddlePolynomialAtAHash, evalOfInitialPolynomialAtAllHashes)
 }
 
 func (circuit *Circuit) Define (api frontend.API) error {
-	g1_0 := polynomials.CircUniPoly(circuit.G1_Coeffs[:], 0, api)
-	g1_1 := polynomials.CircUniPoly(circuit.G1_Coeffs[:], 1, api)
-	api.AssertIsEqual(circuit.C1, api.Add(g1_0, g1_1))
-	api.AssertIsEqual(circuit.R1, poseidon.Hash(api, circuit.Seed))
-	g2_0 := polynomials.CircUniPoly(circuit.G2_Coeffs[:], 0, api)
-	g2_1 := polynomials.CircUniPoly(circuit.G2_Coeffs[:], 1, api)
-	g1_r1 := polynomials.CircUniPoly(circuit.G1_Coeffs[:], circuit.R1, api)
-	api.AssertIsEqual(api.Add(g2_0, g2_1), g1_r1)
-	api.AssertIsEqual(poseidon.Hash(api, circuit.R1), circuit.R2)
-	g2_r2 := polynomials.CircUniPoly(circuit.G2_Coeffs[:], circuit.R2, api)
-	g_eval := polynomials.CircMultPoly(circuit.G_Coeffs[:], []frontend.Variable{circuit.R1, circuit.R2}, api)
-	api.AssertIsEqual(g2_r2, g_eval)
-	return nil
+    var manager = hashmanager.NewHashManager(api)
+    checkFirstRound(api, circuit)
+    checkMiddleRounds(api, circuit, manager)
+    checkLastRound(api, circuit, manager)
+    return nil
 }
 
 func main() {
-	var circuit Circuit 
-	ccs, _ := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
-	pk, vk, _ := groth16.Setup(ccs)
-	// ------
-	R1, _ := new(big.Int).SetString("9256297558679035993185603119224026483248878132105160101344427504900917382708", 10)
-	R2, _ := new(big.Int).SetString("1501086694344315373207989466448958625613689647511317698257372243506299745486", 10)
-	G2_0, _ := new(big1Int).SetString("5880649804197832757310403612414804361198269995899445960335078328126943652508", 10)
-	G2_1, _ := new(big.Int).SetString("5010004099433259042870408211211164478295323719387463638651458302705939844619", 10)
-
-	assignment := Circuit{ 
-		Seed: 47,
-		C1: 34,
-		R1: R1,
-		R2: R2,
-		G_Coeffs: [4]frontend.Variable{1,3,7,10}, //g(x, y) := 1 + 3x + 7y + 10xy
-		G1_Coeffs: [2]frontend.Variable{9,16},
-		G2_Coeffs: [2]frontend.Variable{G2_0, G2_1},
-	}
-	// ------
-	witness, _ := frontend.NewWitness(&assignment, ecc.BN254.ScalarField())
-	publicWitness, _ := witness.Public()
-	proof, _ := groth16.Prove(ccs, pk, witness)
-	groth16.Verify(proof, vk, publicWitness)
+    var CoeffsOfMiddleUnivariatePolynomials = make([][]frontend.Variable, 3)
+    for i:=0;i<3;i++ {
+        CoeffsOfMiddleUnivariatePolynomials[i] = make([]frontend.Variable, 2)
+    }
+    var circuit = Circuit{
+        CoeffsOfInitialMultilinearPolynomial: make([]frontend.Variable, 8),
+        CoeffsOfMiddleUnivariatePolynomials: CoeffsOfMiddleUnivariatePolynomials,
+    }
+    ccs, _ := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
+    pk, vk, _ := groth16.Setup(ccs)
+    G1_0, _ := new(big.Int).SetString("1020204", 10)
+    G1_1, _ := new(big.Int).SetString("10202040", 10)
+    G2_0, _ := new(big.Int).SetString("482480799671326968966589061680369608414568155496865577406024069086729633310015242", 10)
+    G2_1, _ := new(big.Int).SetString("48248079967132696896658906168036960841456815549686557740602406908672963331001524200", 10)
+    G3_0, _ := new(big.Int).SetString("88703303929150795986606904465882177409725616560450802144675156296904524300670214609344006370093441889857321811758012908626046938167740756304280941713422321", 10)
+    G3_1, _ := new(big.Int).SetString("887033039291507959866069044658821774097256165604508021446751562969045243006702146093440063700934418898573218117580129086260469381677407563042809417134223210000", 10)
+    assignment := Circuit{ 
+        InitialSeed: 47,
+        ComputedSum: 12242448,
+        CoeffsOfInitialMultilinearPolynomial: []frontend.Variable{1,10,100,1000,10000, 100000, 1000000, 10000000}, //f(x,y,z) = 1 + 10x + 100y + 1000xy + 10000z + 100000zx + 1000000zy + 10000000zxy
+        CoeffsOfMiddleUnivariatePolynomials: [][]frontend.Variable{[]frontend.Variable{G1_0, G1_1}, []frontend.Variable{G2_0, G2_1}, []frontend.Variable{G3_0, G3_1}},
+    }
+    witness, _ := frontend.NewWitness(&assignment, ecc.BN254.ScalarField())
+    publicWitness, _ := witness.Public()
+    proof, _ := groth16.Prove(ccs, pk, witness)
+    groth16.Verify(proof, vk, publicWitness)
 }
+
+
+
