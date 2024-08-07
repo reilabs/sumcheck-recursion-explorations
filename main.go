@@ -1,12 +1,12 @@
 package main
 
 import(
-    "github.com/vocdoni/gnark-crypto-primitives/poseidon"
     "github.com/consensys/gnark/frontend/cs/r1cs"
     "github.com/consensys/gnark/backend/groth16"
     "github.com/consensys/gnark-crypto/ecc"
     "github.com/consensys/gnark/frontend"
     "tutorial/sumcheck-verifier-circuit/polynomials"
+    "tutorial/sumcheck-verifier-circuit/hashmanager"
     "math/big"
 )
 
@@ -20,32 +20,6 @@ type Circuit struct {
     CoeffsOfMiddleUnivariatePolynomials [][]frontend.Variable `gnark:"Middle Univariate Polynomials Coefficients"`
 }
 
-type TranscriptManager struct {
-    poseidonInstance poseidon.Poseidon 
-    hashCollector *[]frontend.Variable 
-    api frontend.API
-}
-
-func NewTransciptManager (api frontend.API, hashCollector *[]frontend.Variable) *TranscriptManager {
-    manager := new(TranscriptManager)
-    manager.poseidonInstance = poseidon.NewPoseidon(api)
-    manager.hashCollector = hashCollector
-    manager.api = api
-    return manager
-}
-
-func (manager *TranscriptManager) writeInput(inputs ...frontend.Variable)  {
-    manager.poseidonInstance.Write(inputs...)
-}
-
-func (manager *TranscriptManager) writeInputAndCollectAndReturnHash(inputs ...frontend.Variable) frontend.Variable {
-    manager.poseidonInstance.Write(inputs...)
-    hashUntilNow := manager.poseidonInstance.Sum()
-    *(manager.hashCollector) = append(*(manager.hashCollector), hashUntilNow)
-    manager.poseidonInstance.Write(hashUntilNow)
-    return hashUntilNow
-}
-
 func assertSumOfEvaluationAt0And1 (api frontend.API, result frontend.Variable, coeffsOfAPolynomial []frontend.Variable) {
     evalAt0 := polynomials.UniP(coeffsOfAPolynomial, 0, api)
     evalAt1 := polynomials.UniP(coeffsOfAPolynomial, 1, api)
@@ -56,31 +30,27 @@ func checkFirstRound (api frontend.API, circuit *Circuit) {
     assertSumOfEvaluationAt0And1(api, circuit.ComputedSum, circuit.CoeffsOfMiddleUnivariatePolynomials[0])
 }
 
-func checkMiddleRounds (api frontend.API, circuit *Circuit, hashCollector *[]frontend.Variable) {
-    var manager = NewTransciptManager(api, hashCollector)
-    manager.writeInput(circuit.InitialSeed, circuit.ComputedSum)
+func checkMiddleRounds (api frontend.API, circuit *Circuit, manager *hashmanager.HashManager) {
+    manager.WriteInput(circuit.InitialSeed, circuit.ComputedSum)
     for i:=1; i<len(circuit.CoeffsOfMiddleUnivariatePolynomials); i++ {
-        hashUntilNow := manager.writeInputAndCollectAndReturnHash(circuit.CoeffsOfMiddleUnivariatePolynomials[i-1]...)
+        hashUntilNow := manager.WriteInputAndCollectAndReturnHash(circuit.CoeffsOfMiddleUnivariatePolynomials[i-1]...)
         evalOfMiddlePolynomialAtAHash := polynomials.UniP(circuit.CoeffsOfMiddleUnivariatePolynomials[i-1], hashUntilNow, api)
         assertSumOfEvaluationAt0And1(api, evalOfMiddlePolynomialAtAHash, circuit.CoeffsOfMiddleUnivariatePolynomials[i])
     }
 }
 
-func checkLastRound (api frontend.API, circuit *Circuit, hashCollector *[]frontend.Variable) {
-    var hashUntilNow = (*hashCollector)[len(circuit.CoeffsOfMiddleUnivariatePolynomials)-2] // Assumes the sum-check function has at least two variables
-    var manager = NewTransciptManager(api, hashCollector)
-    manager.writeInput(hashUntilNow)
-    hashUntilNow = manager.writeInputAndCollectAndReturnHash(circuit.CoeffsOfMiddleUnivariatePolynomials[len(circuit.CoeffsOfMiddleUnivariatePolynomials)-1]...)
+func checkLastRound (api frontend.API, circuit *Circuit, manager *hashmanager.HashManager) {
+    hashUntilNow := manager.WriteInputAndCollectAndReturnHash(circuit.CoeffsOfMiddleUnivariatePolynomials[len(circuit.CoeffsOfMiddleUnivariatePolynomials)-1]...)
     evalOfMiddlePolynomialAtAHash := polynomials.UniP(circuit.CoeffsOfMiddleUnivariatePolynomials[len(circuit.CoeffsOfMiddleUnivariatePolynomials)-1], hashUntilNow, api)
-    evalOfInitialPolynomialAtAllHashes := polynomials.MultP(circuit.CoeffsOfInitialMultilinearPolynomial, *hashCollector, api)
+    evalOfInitialPolynomialAtAllHashes := polynomials.MultP(circuit.CoeffsOfInitialMultilinearPolynomial, manager.HashCollector, api)
     api.AssertIsEqual(evalOfMiddlePolynomialAtAHash, evalOfInitialPolynomialAtAllHashes)
 }
 
 func (circuit *Circuit) Define (api frontend.API) error {
-    var hashCollector = []frontend.Variable{}
+    var manager = hashmanager.NewHashManager(api)
     checkFirstRound(api, circuit)
-    checkMiddleRounds(api, circuit, &hashCollector)
-    checkLastRound(api, circuit, &hashCollector)
+    checkMiddleRounds(api, circuit, manager)
+    checkLastRound(api, circuit, manager)
     return nil
 }
 
@@ -112,5 +82,6 @@ func main() {
     proof, _ := groth16.Prove(ccs, pk, witness)
     groth16.Verify(proof, vk, publicWitness)
 }
+
 
 
