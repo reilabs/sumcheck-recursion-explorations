@@ -20,6 +20,32 @@ type Circuit struct {
     CoeffsOfMiddleUnivariatePolynomials [][]frontend.Variable `gnark:"Middle Univariate Polynomials Coefficients"`
 }
 
+type TranscriptManager struct {
+    poseidonInstance poseidon.Poseidon 
+    hashCollector *[]frontend.Variable 
+    api frontend.API
+}
+
+func NewTransciptManager (api frontend.API, hashCollector *[]frontend.Variable) *TranscriptManager {
+    manager := new(TranscriptManager)
+    manager.poseidonInstance = poseidon.NewPoseidon(api)
+    manager.hashCollector = hashCollector
+    manager.api = api
+    return manager
+}
+
+func (manager *TranscriptManager) writeInput(inputs ...frontend.Variable)  {
+    manager.poseidonInstance.Write(inputs...)
+}
+
+func (manager *TranscriptManager) writeInputAndCollectAndReturnHash(inputs ...frontend.Variable) frontend.Variable {
+    manager.poseidonInstance.Write(inputs...)
+    hashUntilNow := manager.poseidonInstance.Sum()
+    *(manager.hashCollector) = append(*(manager.hashCollector), hashUntilNow)
+    manager.poseidonInstance.Write(hashUntilNow)
+    return hashUntilNow
+}
+
 func assertSumOfEvaluationAt0And1 (api frontend.API, result frontend.Variable, coeffsOfAPolynomial []frontend.Variable) {
     evalAt0 := polynomials.UniP(coeffsOfAPolynomial, 0, api)
     evalAt1 := polynomials.UniP(coeffsOfAPolynomial, 1, api)
@@ -31,14 +57,10 @@ func checkFirstRound (api frontend.API, circuit *Circuit) {
 }
 
 func checkMiddleRounds (api frontend.API, circuit *Circuit, hashCollector *[]frontend.Variable) {
-    var poseidonInstance = poseidon.NewPoseidon(api)
-    poseidonInstance.Write(circuit.InitialSeed)
-    poseidonInstance.Write(circuit.ComputedSum)
+    var manager = NewTransciptManager(api, hashCollector)
+    manager.writeInput(circuit.InitialSeed, circuit.ComputedSum)
     for i:=1; i<len(circuit.CoeffsOfMiddleUnivariatePolynomials); i++ {
-        poseidonInstance.Write(circuit.CoeffsOfMiddleUnivariatePolynomials[i-1]...)
-        hashUntilNow := poseidonInstance.Sum()
-        *hashCollector = append(*hashCollector, hashUntilNow)
-        poseidonInstance.Write(hashUntilNow)
+        hashUntilNow := manager.writeInputAndCollectAndReturnHash(circuit.CoeffsOfMiddleUnivariatePolynomials[i-1]...)
         evalOfMiddlePolynomialAtAHash := polynomials.UniP(circuit.CoeffsOfMiddleUnivariatePolynomials[i-1], hashUntilNow, api)
         assertSumOfEvaluationAt0And1(api, evalOfMiddlePolynomialAtAHash, circuit.CoeffsOfMiddleUnivariatePolynomials[i])
     }
@@ -46,11 +68,9 @@ func checkMiddleRounds (api frontend.API, circuit *Circuit, hashCollector *[]fro
 
 func checkLastRound (api frontend.API, circuit *Circuit, hashCollector *[]frontend.Variable) {
     var hashUntilNow = (*hashCollector)[len(circuit.CoeffsOfMiddleUnivariatePolynomials)-2] // Assumes the sum-check function has at least two variables
-    var poseidonInstance = poseidon.NewPoseidon(api)
-    poseidonInstance.Write(hashUntilNow)
-    poseidonInstance.Write(circuit.CoeffsOfMiddleUnivariatePolynomials[len(circuit.CoeffsOfMiddleUnivariatePolynomials)-1]...)
-    hashUntilNow = poseidonInstance.Sum()
-    *hashCollector = append(*hashCollector, hashUntilNow)
+    var manager = NewTransciptManager(api, hashCollector)
+    manager.writeInput(hashUntilNow)
+    hashUntilNow = manager.writeInputAndCollectAndReturnHash(circuit.CoeffsOfMiddleUnivariatePolynomials[len(circuit.CoeffsOfMiddleUnivariatePolynomials)-1]...)
     evalOfMiddlePolynomialAtAHash := polynomials.UniP(circuit.CoeffsOfMiddleUnivariatePolynomials[len(circuit.CoeffsOfMiddleUnivariatePolynomials)-1], hashUntilNow, api)
     evalOfInitialPolynomialAtAllHashes := polynomials.MultP(circuit.CoeffsOfInitialMultilinearPolynomial, *hashCollector, api)
     api.AssertIsEqual(evalOfMiddlePolynomialAtAHash, evalOfInitialPolynomialAtAllHashes)
