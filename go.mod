@@ -21,6 +21,7 @@ require (
 	github.com/mmcloughlin/addchain v0.4.0 // indirect
 	github.com/rs/zerolog v1.30.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
+	golang.org/x/exp v0.0.0-20240909161429-701f63a606c0
 	golang.org/x/sys v0.15.0 // indirect
 	rsc.io/tmplfunc v0.0.3 // indirect
 )

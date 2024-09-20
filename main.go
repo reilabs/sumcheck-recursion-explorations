@@ -2,12 +2,12 @@ package main
 
 import (
 	"math/big"
-	"math/rand"
 
 	"github.com/consensys/gnark-crypto/ecc"
 	"github.com/consensys/gnark/backend/groth16"
 	"github.com/consensys/gnark/frontend"
 	"github.com/consensys/gnark/frontend/cs/r1cs"
+	"golang.org/x/exp/rand"
 )
 
 type Circuit struct {
@@ -20,6 +20,8 @@ type Circuit struct {
 }
 
 const NUMBER_OF_COEFFS_IN_LINEAR = 2
+const NUMBER_OF_COEFFS_IN_QUADRATIC = 3
+const NUMBER_OF_COEFFS_IN_CUBIC = 4
 
 var ONE_HALF_CONSTANT *big.Int
 
@@ -33,15 +35,20 @@ func Init() {
 
 func (circuit *Circuit) Define(api frontend.API) error {
 	// var manager = hashmanager.NewHashManager(api)
-	api.AssertIsEqual(circuit.ExpectedSum, api.Add(circuit.GPolynomials[0][0], api.Add(circuit.GPolynomials[0][0], circuit.GPolynomials[0][1])))
 	g_length := len(circuit.GPolynomials)
 	api.AssertIsEqual(g_length, len(circuit.ChallengeVector))
 	e := circuit.ExpectedSum
 	for i := 0; i < g_length; i++ {
-		api.AssertIsEqual(len(circuit.GPolynomials[i]), NUMBER_OF_COEFFS_IN_LINEAR)
+		// api.AssertIsEqual(len(circuit.GPolynomials[i]), NUMBER_OF_COEFFS_IN_LINEAR)
+		api.AssertIsEqual(len(circuit.GPolynomials[i]), NUMBER_OF_COEFFS_IN_CUBIC)
+
 		// Equivavent constraint to the one below it, doesn't require GPoly[i][0]
 		// e = api.Add(api.Mul(ONE_HALF_CONSTANT, api.Add(e, api.Neg(circuit.GPolynomials[i][1]))), api.Mul(circuit.ChallengeVector[i], circuit.GPolynomials[i][1]))
-		e = api.Add(circuit.GPolynomials[i][0], api.Mul(circuit.ChallengeVector[i], circuit.GPolynomials[i][1]))
+		cumulative := circuit.GPolynomials[i][NUMBER_OF_COEFFS_IN_CUBIC-1]
+		for j := NUMBER_OF_COEFFS_IN_CUBIC - 2; j >= 1; j-- {
+			cumulative = api.Add(circuit.GPolynomials[i][j], api.Mul(cumulative, circuit.ChallengeVector[i]))
+		}
+		e = api.Add(circuit.GPolynomials[i][0], api.Mul(cumulative, circuit.ChallengeVector[i]))
 	}
 	api.AssertIsEqual(e, circuit.ValueAtChallengeVector)
 	return nil
@@ -71,12 +78,129 @@ func replace_r_in_f(f []int, r int) []int {
 
 func main() {
 	Init()
-	var number_of_variables = 3
+
+	// START Basic case
+	// var number_of_variables = 3
+
+	// // initialize coefficients
+	// var coeffs_univariate_polynomials = make([][]frontend.Variable, number_of_variables)
+	// for i := 0; i < number_of_variables; i++ {
+	// 	coeffs_univariate_polynomials[i] = make([]frontend.Variable, NUMBER_OF_COEFFS_IN_LINEAR)
+	// }
+	// var challenge_vec = make([]frontend.Variable, number_of_variables)
+	// var circuit = Circuit{
+	// 	GPolynomials:    coeffs_univariate_polynomials,
+	// 	ChallengeVector: challenge_vec,
+	// }
+
+	// ccs, _ := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
+	// pk, vk, _ := groth16.Setup(ccs)
+
+	// // f(x, y, z) = xy + yz + 2x + 3z
+	// // polynomials are represented by their evals at {0,1}^3, ordered sequentially, (0,1,1) -> 4
+
+	// var f = []int{0, 3, 0, 4, 2, 5, 3, 7}
+
+	// var initial_expected_sum = sumArray(f)
+	// var expected_sum = sumArray(f)
+	// var challenge_vector []frontend.Variable
+
+	// println(expected_sum)
+
+	// for i := 0; i < number_of_variables; i++ {
+	// 	p_0 := sumArray(f[:len(f)/2])
+	// 	p_1 := expected_sum - p_0 - p_0
+	// 	coeffs_univariate_polynomials[i] = []frontend.Variable{p_0, p_1}
+	// 	r := rand.Intn(11)
+	// 	println("r_", i, " = ", r)
+	// 	challenge_vector = append(challenge_vector, r)
+	// 	f = replace_r_in_f(f, r)
+	// 	expected_sum = p_0 + r*p_1
+	// }
+
+	// assignment := Circuit{
+	// 	ExpectedSum:            initial_expected_sum,
+	// 	ValueAtChallengeVector: expected_sum,
+	// 	GPolynomials:           coeffs_univariate_polynomials,
+	// 	ChallengeVector:        challenge_vector,
+	// }
+	// witness, _ := frontend.NewWitness(&assignment, ecc.BN254.ScalarField())
+	// publicWitness, _ := witness.Public()
+	// proof, _ := groth16.Prove(ccs, pk, witness)
+	// groth16.Verify(proof, vk, publicWitness)
+
+	// END Basic case
+
+	// START A bit more advanced case
+	// Sum_x f(x) * g(x)
+
+	// var number_of_variables = 2
+
+	// // initialize coefficients
+	// var coeffs_univariate_polynomials = make([][]frontend.Variable, number_of_variables)
+	// for i := 0; i < number_of_variables; i++ {
+	// 	coeffs_univariate_polynomials[i] = make([]frontend.Variable, NUMBER_OF_COEFFS_IN_QUADRATIC)
+	// }
+	// var challenge_vec = make([]frontend.Variable, number_of_variables)
+	// var circuit = Circuit{
+	// 	GPolynomials:    coeffs_univariate_polynomials,
+	// 	ChallengeVector: challenge_vec,
+	// }
+
+	// ccs, _ := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
+	// pk, vk, _ := groth16.Setup(ccs)
+
+	// // f(x, y) = 2x + 3y + 1
+	// // g(x, y) = x + xy + 2y
+	// // polynomials are represented by their evals at {0,1}^2, ordered sequentially, (0,1) -> 4*2 = 8
+
+	// var f = []int{1, 4, 3, 6}
+	// var g = []int{0, 2, 1, 4}
+	// var f_g = []int{0, 8, 3, 24}
+	// var initial_expected_sum = sumArray(f_g)
+	// var expected_sum = initial_expected_sum
+	// var challenge_vector []frontend.Variable
+
+	// println(expected_sum)
+
+	// for i := 0; i < number_of_variables; i++ {
+	// 	p_0 := 0
+	// 	p_2 := 0
+	// 	for j := 0; j < len(f)/2; j++ {
+	// 		p_0 += f[j] * g[j]
+	// 		p_2 += (f[j+(len(f)/2)] - f[j]) * (g[j+(len(g)/2)] - g[j])
+	// 	}
+
+	// 	p_1 := expected_sum - p_0 - p_0 - p_2
+	// 	coeffs_univariate_polynomials[i] = []frontend.Variable{p_0, p_1, p_2}
+	// 	r := rand.Intn(11)
+	// 	println("r_", i, " = ", r)
+	// 	challenge_vector = append(challenge_vector, r)
+	// 	f = replace_r_in_f(f, r)
+	// 	g = replace_r_in_f(g, r)
+	// 	expected_sum = p_0 + r*(p_1+r*p_2)
+	// }
+
+	// assignment := Circuit{
+	// 	ExpectedSum:            initial_expected_sum,
+	// 	ValueAtChallengeVector: expected_sum,
+	// 	GPolynomials:           coeffs_univariate_polynomials,
+	// 	ChallengeVector:        challenge_vector,
+	// }
+	// witness, _ := frontend.NewWitness(&assignment, ecc.BN254.ScalarField())
+	// publicWitness, _ := witness.Public()
+	// proof, _ := groth16.Prove(ccs, pk, witness)
+	// groth16.Verify(proof, vk, publicWitness)
+	// END A bit more advanced case
+
+	// START R1CS case
+	// Sum_x e(x) * (a(x) * b(x) - c(x))
+	var number_of_variables = 2
 
 	// initialize coefficients
 	var coeffs_univariate_polynomials = make([][]frontend.Variable, number_of_variables)
 	for i := 0; i < number_of_variables; i++ {
-		coeffs_univariate_polynomials[i] = make([]frontend.Variable, NUMBER_OF_COEFFS_IN_LINEAR)
+		coeffs_univariate_polynomials[i] = make([]frontend.Variable, NUMBER_OF_COEFFS_IN_CUBIC)
 	}
 	var challenge_vec = make([]frontend.Variable, number_of_variables)
 	var circuit = Circuit{
@@ -86,27 +210,41 @@ func main() {
 
 	ccs, _ := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
 	pk, vk, _ := groth16.Setup(ccs)
+	// proof for some random values of e, Az, Bz, Cz
+	// still to validate for real A,B,C and its witness vector
 
-	// f(x, y, z) = xy + yz + 2x + 3z
-	// polynomials are represented by their evals at {0,1}^3, ordered sequentially, (0,1,1) -> 4
-
-	var f = []int{0, 3, 0, 4, 2, 5, 3, 7}
-
-	var initial_expected_sum = sumArray(f)
-	var expected_sum = sumArray(f)
+	var e = []int{1, 4, 3, 6}
+	var a_z = []int{0, 2, 1, 4}
+	var b_z = []int{0, 2, 1, 4}
+	var c_z = []int{0, 2, 1, 4}
+	var final = []int{0, 16, 0, 6 * 12}
+	var initial_expected_sum = sumArray(final)
+	var expected_sum = initial_expected_sum
 	var challenge_vector []frontend.Variable
 
 	println(expected_sum)
 
 	for i := 0; i < number_of_variables; i++ {
-		p_0 := sumArray(f[:len(f)/2])
-		p_1 := expected_sum - p_0 - p_0
-		coeffs_univariate_polynomials[i] = []frontend.Variable{p_0, p_1}
+		p_0 := 0
+		p_tmp := 0
+		p_3 := 0
+		offset := len(e) / 2
+		for j := 0; j < len(e)/2; j++ {
+			p_0 += e[j] * (a_z[j]*a_z[j] - a_z[j])
+			p_tmp += (2*e[j] - e[j+offset]) * ((2*a_z[j]-a_z[j+offset])*(2*b_z[j]-b_z[j+offset]) - (2*c_z[j] - c_z[j+offset]))
+			p_3 += (e[j+offset] - e[j]) * (a_z[j+offset] - a_z[j]) * (b_z[j+offset] - b_z[j])
+		}
+		p_2 := (expected_sum + p_tmp - p_0 - p_0 - p_0) / 2
+		p_1 := expected_sum - p_0 - p_0 - p_3 - p_2
+		coeffs_univariate_polynomials[i] = []frontend.Variable{p_0, p_1, p_2, p_3}
 		r := rand.Intn(11)
 		println("r_", i, " = ", r)
 		challenge_vector = append(challenge_vector, r)
-		f = replace_r_in_f(f, r)
-		expected_sum = p_0 + r*p_1
+		e = replace_r_in_f(e, r)
+		a_z = replace_r_in_f(a_z, r)
+		b_z = replace_r_in_f(b_z, r)
+		c_z = replace_r_in_f(c_z, r)
+		expected_sum = p_0 + r*(p_1+r*(p_2+r*p_3))
 	}
 
 	assignment := Circuit{
@@ -119,4 +257,5 @@ func main() {
 	publicWitness, _ := witness.Public()
 	proof, _ := groth16.Prove(ccs, pk, witness)
 	groth16.Verify(proof, vk, publicWitness)
+	//END R1CS case
 }
