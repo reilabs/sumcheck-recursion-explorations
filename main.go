@@ -2,11 +2,13 @@ package main
 
 import (
 	"math/big"
+	"tutorial/sumcheck-verifier-circuit/hashmanager"
 
 	"github.com/consensys/gnark-crypto/ecc"
 	"github.com/consensys/gnark/backend/groth16"
 	"github.com/consensys/gnark/frontend"
 	"github.com/consensys/gnark/frontend/cs/r1cs"
+	"github.com/iden3/go-iden3-crypto/poseidon"
 	"golang.org/x/exp/rand"
 )
 
@@ -34,7 +36,7 @@ func Init() {
 }
 
 func (circuit *Circuit) Define(api frontend.API) error {
-	// var manager = hashmanager.NewHashManager(api)
+	var manager = hashmanager.NewHashManager(api)
 	g_length := len(circuit.GPolynomials)
 	api.AssertIsEqual(g_length, len(circuit.ChallengeVector))
 	e := circuit.ExpectedSum
@@ -44,6 +46,10 @@ func (circuit *Circuit) Define(api frontend.API) error {
 
 		// Equivavent constraint to the one below it, doesn't require GPoly[i][0]
 		// e = api.Add(api.Mul(ONE_HALF_CONSTANT, api.Add(e, api.Neg(circuit.GPolynomials[i][1]))), api.Mul(circuit.ChallengeVector[i], circuit.GPolynomials[i][1]))
+		// println("hash preimage: ", circuit.GPolynomials[i][0])
+		api.Println(circuit.GPolynomials[i][0])
+		hashUntilNow := manager.WriteInputAndCollectAndReturnHash(circuit.GPolynomials[i][0])
+		api.Println(hashUntilNow)
 		cumulative := circuit.GPolynomials[i][NUMBER_OF_COEFFS_IN_CUBIC-1]
 		for j := NUMBER_OF_COEFFS_IN_CUBIC - 2; j >= 1; j-- {
 			cumulative = api.Add(circuit.GPolynomials[i][j], api.Mul(cumulative, circuit.ChallengeVector[i]))
@@ -213,11 +219,14 @@ func main() {
 	// proof for some random values of e, Az, Bz, Cz
 	// still to validate for real A,B,C and its witness vector
 
-	var e = []int{1, 4, 3, 6}
-	var a_z = []int{0, 2, 1, 4}
-	var b_z = []int{0, 2, 1, 4}
-	var c_z = []int{0, 2, 1, 4}
-	var final = []int{0, 16, 0, 6 * 12}
+	VerifyR1CS()
+
+	var e = []int{1, 4, 3, 6, 3, 5}
+
+	var a_z = []int{3, 9, 30, 25, 5, 25}
+	var b_z = []int{3, 3, 1, 1, 5, 1}
+	var c_z = []int{9, 27, 30, 25, 25, 25}
+	var final = []int{0, 324, 180, 750, 150, 500}
 	var initial_expected_sum = sumArray(final)
 	var expected_sum = initial_expected_sum
 	var challenge_vector []frontend.Variable
@@ -236,7 +245,10 @@ func main() {
 		}
 		p_2 := (expected_sum + p_tmp - p_0 - p_0 - p_0) / 2
 		p_1 := expected_sum - p_0 - p_0 - p_3 - p_2
+		println("P_0 = ", p_0)
 		coeffs_univariate_polynomials[i] = []frontend.Variable{p_0, p_1, p_2, p_3}
+		// println("============")
+		println(poseidon.Hash([]*big.Int{}))
 		r := rand.Intn(11)
 		println("r_", i, " = ", r)
 		challenge_vector = append(challenge_vector, r)
