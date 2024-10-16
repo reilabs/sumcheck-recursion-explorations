@@ -1,62 +1,51 @@
 package main
 
-import(
-	"github.com/vocdoni/gnark-crypto-primitives/poseidon"
-	"github.com/consensys/gnark/frontend/cs/r1cs"
-	"github.com/consensys/gnark/backend/groth16"
+import (
+	// "fmt"
 	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark/backend/groth16"
 	"github.com/consensys/gnark/frontend"
-	"tutorial/sumcheck-verifier-circuit/polynomials"
-	// "github.com/kr/pretty"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
 	"math/big"
-)
+)	
 
 type Circuit struct {
-	Seed frontend.Variable `gnark:"Seed"` 
-	C1 frontend.Variable `gnark:"C1"`
-	R1 frontend.Variable `gnark:"R1"`
-	R2 frontend.Variable `gnark:"R2"`
-	G_Coeffs [4]frontend.Variable `gnark:"G Coefficients"`
-	G1_Coeffs [2]frontend.Variable `gnark:"G1 Coefficients"`
-	G2_Coeffs [2]frontend.Variable `gnark:"G2 Coefficients"`
+	Evaluation  frontend.Variable `gnark:"Supposed evaluation of the polynomial for the verifier query"`
+	InitialPolynomialEvaluations []frontend.Variable `gnark:"Expected Sum"`
+	InitialCombinationRandomness frontend.Variable `gnark:"Combination Randomness"` //This one should be squeezed out of the proof
+	OODEvaluation frontend.Variable `gnark:"Combination Randomness"`
 }
 
-func (circuit *Circuit) Define (api frontend.API) error {
-	g1_0 := polynomials.CircUniPoly(circuit.G1_Coeffs[:], 0, api)
-	g1_1 := polynomials.CircUniPoly(circuit.G1_Coeffs[:], 1, api)
-	api.AssertIsEqual(circuit.C1, api.Add(g1_0, g1_1))
-	api.AssertIsEqual(circuit.R1, poseidon.Hash(api, circuit.Seed))
-	g2_0 := polynomials.CircUniPoly(circuit.G2_Coeffs[:], 0, api)
-	g2_1 := polynomials.CircUniPoly(circuit.G2_Coeffs[:], 1, api)
-	g1_r1 := polynomials.CircUniPoly(circuit.G1_Coeffs[:], circuit.R1, api)
-	api.AssertIsEqual(api.Add(g2_0, g2_1), g1_r1)
-	api.AssertIsEqual(poseidon.Hash(api, circuit.R1), circuit.R2)
-	g2_r2 := polynomials.CircUniPoly(circuit.G2_Coeffs[:], circuit.R2, api)
-	g_eval := polynomials.CircMultPoly(circuit.G_Coeffs[:], []frontend.Variable{circuit.R1, circuit.R2}, api)
-	api.AssertIsEqual(g2_r2, g_eval)
+func (circuit *Circuit) Define(api frontend.API) error {
+	sumOverBools := api.Add(circuit.InitialPolynomialEvaluations[0], circuit.InitialPolynomialEvaluations[1])
+	plugInEvaluation := api.Add(circuit.OODEvaluation, api.Mul(circuit.InitialCombinationRandomness, circuit.Evaluation))
+	api.AssertIsEqual(sumOverBools, plugInEvaluation)
 	return nil
 }
 
 func main() {
-	var circuit Circuit 
+	var initialPolynomialPlaceholder = make([]frontend.Variable, 3)
+	var circuit = Circuit{
+		InitialPolynomialEvaluations: initialPolynomialPlaceholder,
+	}
 	ccs, _ := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
 	pk, vk, _ := groth16.Setup(ccs)
-	// ------
-	R1, _ := new(big.Int).SetString("9256297558679035993185603119224026483248878132105160101344427504900917382708", 10)
-	R2, _ := new(big.Int).SetString("1501086694344315373207989466448958625613689647511317698257372243506299745486", 10)
-	G2_0, _ := new(big1Int).SetString("5880649804197832757310403612414804361198269995899445960335078328126943652508", 10)
-	G2_1, _ := new(big.Int).SetString("5010004099433259042870408211211164478295323719387463638651458302705939844619", 10)
-
-	assignment := Circuit{ 
-		Seed: 47,
-		C1: 34,
-		R1: R1,
-		R2: R2,
-		G_Coeffs: [4]frontend.Variable{1,3,7,10}, //g(x, y) := 1 + 3x + 7y + 10xy
-		G1_Coeffs: [2]frontend.Variable{9,16},
-		G2_Coeffs: [2]frontend.Variable{G2_0, G2_1},
+	
+	evaluation, _ := new(big.Int).SetString("6", 10)
+	coeff1, _ := new(big.Int).SetString("7529750666988914074745719251931937881520028440248195310154011364354260691222", 10)
+	coeff2, _ := new(big.Int).SetString("9794441924853000479973554649540588199056692045660459233737985907256721979560", 10)
+	coeff3, _ := new(big.Int).SetString("13329240161431836426016876217180991137593108258493123784047829475319792427981", 10)
+	oodEvaluation, _ := new(big.Int).SetString("17056459034653802837952596924932948883816720581463178781510726994247050239464", 10)
+	 
+	initialCombinationRandomness, _:= new(big.Int).SetString("7340703216811110360209914744509021228976121450879590741629613108419258237092", 10)
+	
+	assignment := Circuit{
+		Evaluation: evaluation, 
+		InitialPolynomialEvaluations:  []frontend.Variable{coeff1, coeff2, coeff3},
+		InitialCombinationRandomness: initialCombinationRandomness,
+		OODEvaluation: oodEvaluation,
 	}
-	// ------
+
 	witness, _ := frontend.NewWitness(&assignment, ecc.BN254.ScalarField())
 	publicWitness, _ := witness.Public()
 	proof, _ := groth16.Prove(ccs, pk, witness)

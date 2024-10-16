@@ -5,7 +5,6 @@ go 1.22.5
 require (
 	github.com/consensys/gnark v0.10.0
 	github.com/consensys/gnark-crypto v0.13.0
-	github.com/vocdoni/gnark-crypto-primitives v0.0.1
 )
 
 require (
