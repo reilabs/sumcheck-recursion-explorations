@@ -12,14 +12,6 @@ import (
 	"github.com/iden3/go-iden3-crypto/poseidon"
 )
 
-type Circuit struct {
-	// Alleged computed sum of all the evaluations
-	ExpectedSum            frontend.Variable `gnark:"ExpectedSum"`
-	ValueAtChallengeVector frontend.Variable `gnark:"ValueAtChallengeVector"`
-	// Array of elements representing the values of p0, p1 in each of the rounds
-	GPolynomials [][]frontend.Variable `gnark:"GPolynomials"`
-}
-
 const NUMBER_OF_COEFFS_IN_LINEAR = 2
 const NUMBER_OF_COEFFS_IN_QUADRATIC = 3
 const NUMBER_OF_COEFFS_IN_CUBIC = 4
@@ -34,6 +26,14 @@ func Init() {
 	if !success {
 		fmt.Println("Error: Failed to set big.Int value")
 	}
+}
+
+type Circuit struct {
+	// Alleged computed sum of all the evaluations
+	ExpectedSum            frontend.Variable `gnark:"ExpectedSum"`
+	ValueAtChallengeVector frontend.Variable `gnark:"ValueAtChallengeVector"`
+	// Array of elements representing the values of p0, p1 in each of the rounds
+	GPolynomials [][]frontend.Variable `gnark:"GPolynomials"`
 }
 
 func (circuit *Circuit) Define(api frontend.API) error {
@@ -58,10 +58,13 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	return nil
 }
 
-func sumArray(numbers []*big.Int) *big.Int {
+func calculateCubic(e []*big.Int, a_z []*big.Int, b_z []*big.Int, c_z []*big.Int) *big.Int {
 	result := big.NewInt(0)
-	for i := 0; i < len(numbers); i++ {
-		result.Add(result, numbers[i])
+	for i := 0; i < len(e); i++ {
+		tmp := new(big.Int).Mul(a_z[i], b_z[i])
+		tmp.Sub(tmp, c_z[i])
+		tmp.Mul(tmp, e[i])
+		result.Add(result, tmp)
 	}
 	return result
 }
@@ -108,6 +111,8 @@ func main() {
 		big.NewInt(6),
 		big.NewInt(3),
 		big.NewInt(5),
+		big.NewInt(0),
+		big.NewInt(0),
 	}
 
 	var a_z = []*big.Int{
@@ -117,6 +122,8 @@ func main() {
 		big.NewInt(25),
 		big.NewInt(5),
 		big.NewInt(25),
+		big.NewInt(0),
+		big.NewInt(0),
 	}
 
 	var b_z = []*big.Int{
@@ -126,6 +133,8 @@ func main() {
 		big.NewInt(1),
 		big.NewInt(5),
 		big.NewInt(1),
+		big.NewInt(0),
+		big.NewInt(0),
 	}
 
 	var c_z = []*big.Int{
@@ -135,18 +144,11 @@ func main() {
 		big.NewInt(25),
 		big.NewInt(25),
 		big.NewInt(25),
-	}
-
-	var final = []*big.Int{
 		big.NewInt(0),
-		big.NewInt(324),
-		big.NewInt(180),
-		big.NewInt(750),
-		big.NewInt(150),
-		big.NewInt(500),
+		big.NewInt(0),
 	}
 
-	var initial_expected_sum = sumArray(final)
+	var initial_expected_sum = calculateCubic(e, a_z, b_z, c_z)
 	var expected_sum = new(big.Int).Set(initial_expected_sum)
 	var challenge_vector []frontend.Variable
 
@@ -158,10 +160,10 @@ func main() {
 		p_3 := big.NewInt(0)
 		offset := len(e) / 2
 		for j := 0; j < len(e)/2; j++ {
-			// p_0 += e[j] * (a_z[j]*a_z[j] - a_z[j])
-			temp1 := new(big.Int).Mul(a_z[j], a_z[j]) // a_z[j]*a_z[j]
-			temp1.Sub(temp1, a_z[j])                  // temp1 = temp1 - a_z[j]
-			temp1.Mul(temp1, e[j])                    // temp1 = e[j] * (a_z[j]*a_z[j] - a_z[j])
+			// p_0 += e[j] * (a_z[j]*b_z[j] - c_z[j])
+			temp1 := new(big.Int).Mul(a_z[j], b_z[j]) // a_z[j]*a_z[j]
+			temp1.Sub(temp1, c_z[j])                  // temp1 = temp1 - c_z[j]
+			temp1.Mul(temp1, e[j])                    // temp1 = e[j] * (a_z[j]*b_z[j] - c_z[j])
 			p_0.Add(p_0, temp1)
 			p_0.Mod(temp1, MOD)
 

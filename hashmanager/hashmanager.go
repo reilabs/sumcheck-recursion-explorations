@@ -27,5 +27,6 @@ func (manager *HashManager) WriteInputAndCollectAndReturnHash(inputs ...frontend
 	hashUntilNow := manager.poseidonInstance.Sum()
 	// manager.HashCollector = append(manager.HashCollector, hashUntilNow)
 	// manager.poseidonInstance.Write(hashUntilNow)
+	manager.poseidonInstance.Reset()
 	return hashUntilNow
 }
